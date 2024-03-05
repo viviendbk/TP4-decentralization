@@ -1,13 +1,16 @@
 import axios from "axios";
 import bodyParser from "body-parser";
 import express, { Request, Response } from "express";
-import { BASE_USER_PORT } from "../config";
+import { BASE_USER_PORT, REGISTRY_PORT, BASE_ONION_ROUTER_PORT } from "../config";
+import {GetNodeRegistryBody, Node} from "@/src/registry/registry";
+import {createRandomSymmetricKey, exportSymKey, importSymKey, rsaEncrypt, symEncrypt} from "../crypto";
 
 export type SendMessageBody = {
   message: string;
   destinationUserId: number;
 };
 
+let lastCircuit: Node[] = [];
 let lastReceivedMessage: string | null = null;
 let lastSentMessage: string | null = null;
 
@@ -28,6 +31,10 @@ export async function user(userId: number) {
     res.json({ result: lastSentMessage });
   });
 
+  _user.get("/getLastCircuit", (req, res) => {
+    res.status(200).json({result: lastCircuit.map((node) => node.nodeId)});
+  });
+
   _user.post("/message", (req, res) => {
     const { message }: { message: string } = req.body;
 
@@ -44,20 +51,22 @@ export async function user(userId: number) {
 
     // Fetch the node registry to get information about registered nodes
     try {
-      const response = await axios.get("http://localhost:8080/getNodeRegistry");
-      const nodes: any[] = response.data.nodes;
+      const response = await axios.get(`http://localhost:${REGISTRY_PORT}/getNodeRegistry`);
+      const nodes: Node[] = response.data.nodes;
 
       // Pick 3 random distinct nodes from the registry
-      const selectedNodes = getRandomDistinctNodes(nodes, 3);
+      const selectedNodes: Node[] = getRandomDistinctNodes(nodes, 3);
 
       // Encrypt the message with layers of encryption and forward to entry node
-      const entryNode = selectedNodes[0];
       const encryptedMessage = await encryptAndForwardMessage(message, destinationUserId, selectedNodes);
 
+      selectedNodes.reverse()
+
       // Forward the encrypted message to the entry node
-      await axios.post(`http://localhost:${entryNode.nodeId + 4000}/message`, { message: encryptedMessage });
+      await axios.post(`http://localhost:${BASE_ONION_ROUTER_PORT + selectedNodes[0].nodeId}/message`, { message: encryptedMessage });
 
       lastSentMessage = message; // Update last sent message
+      lastCircuit = selectedNodes; // Update last circuit
 
       res.status(200).json({ message: "Message sent successfully" });
     } catch (error) {
@@ -74,7 +83,6 @@ export async function user(userId: number) {
   return server;
 }
 
-// Helper function to pick 'count' random distinct nodes from the node registry
 function getRandomDistinctNodes(nodes: any[], count: number): any[] {
   const result: any[] = [];
   const indexes = new Set();
@@ -90,30 +98,19 @@ function getRandomDistinctNodes(nodes: any[], count: number): any[] {
   return result;
 }
 
-// Helper function to encrypt message with layers of encryption and forward to entry node
 async function encryptAndForwardMessage(message: string, destinationUserId: number, nodes: any[]): Promise<string> {
-  let encryptedMessage = message;
+  let destination = `${BASE_USER_PORT + destinationUserId}`.padStart(10, "0");
+  let finalMessage = message;
 
-  for (let i = nodes.length - 1; i >= 0; i--) {
-    const currentNode = nodes[i];
-    const nextNode = i === 0 ? destinationUserId.toString().padStart(10, "0") : nodes[i - 1].nodeId.toString().padStart(10, "0");
-
-    // Step 1: Encrypt the message with the symmetric key
-    // Step 2: Encrypt the symmetric key with the RSA public key of the current node
-    // Concatenate the results in the required order
-    encryptedMessage = await encryptWithSymmetricKey(encryptedMessage, nextNode) + await encryptWithPublicKey(currentNode.pubKey, encryptedMessage);
+  for(const node of nodes) {
+    const symmetricKey = await createRandomSymmetricKey();
+    const symmetricKey64 = await exportSymKey(symmetricKey);
+    const encryptedMessage = await symEncrypt(symmetricKey, `${destination + finalMessage}`);
+    destination = `${BASE_ONION_ROUTER_PORT + node.nodeId}`.padStart(10, '0');
+    const encryptedSymKey = await rsaEncrypt(symmetricKey64, node.pubKey);
+    finalMessage = encryptedSymKey + encryptedMessage;
   }
 
-  return encryptedMessage;
+  return finalMessage;
 }
 
-// Placeholder functions for encryption with symmetric key and RSA public key
-async function encryptWithSymmetricKey(message: string, key: string): Promise<string> {
-  // Implement encryption with symmetric key
-  return "Encrypted with symmetric key";
-}
-
-async function encryptWithPublicKey(publicKey: string, message: string): Promise<string> {
-  // Implement encryption with RSA public key
-  return "Encrypted with RSA public key";
-}
