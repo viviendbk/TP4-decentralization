@@ -40,7 +40,7 @@ export async function user(userId: number) {
 
     if (message) {
       lastReceivedMessage = message;
-      res.status(200).json({ message: "Message received successfully" });
+      res.status(200).send("success");
     } else {
       res.status(400).json({ error: "Invalid request body" });
     }

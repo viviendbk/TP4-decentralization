@@ -20,6 +20,7 @@ import {
   symDecrypt,
   symEncrypt,
 } from "../../src/crypto";
+import * as console from "console";
 const { validateEncryption } = require("./utils");
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
@@ -301,6 +302,10 @@ describe("Onion Routing", () => {
       it("Each node is registered", async () => {
         const nodes = await getNodeRegistry();
 
+        console.log(nodes);
+
+        const { publicKey, privateKey } = await generateRsaKeyPair();
+
         for (let index = 0; index < 10; index++) {
           const node = nodes.find((_n) => _n.nodeId === index);
           expect(node).not.toBeUndefined();
@@ -418,7 +423,9 @@ describe("Onion Routing", () => {
   describe("Creating all cryptographic functions - 4pt", () => {
     it("Can generate RSA key pair - 0.5pt", async () => {
       const { publicKey, privateKey } = await generateRsaKeyPair();
-
+      console.log("publicKey", publicKey);
+      console.log("privateKey", privateKey);
+      console.log("AAAAAAAAAAAAAAAAA");
       expect(publicKey).toBeTruthy();
 
       expect(publicKey.algorithm.name).toBe("RSA-OAEP");
